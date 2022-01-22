@@ -66,7 +66,9 @@ fn inspector(world: &mut World, inspected: Option<Entity>, ui: &mut egui::Ui, st
         let reg = reg.read();
         world.resource_scope(|world, comp_types: Mut<ComponentTypes>| {
             ui.vertical_centered_justified(|ui| {
+                let width = ui.available_size().x;
                 ui.menu_button("Add Component", |ui| {
+                    ui.set_max_width(width);
                     ui.text_edit_singleline(&mut state.component_search);
                     for (name, id) in comp_types.0.iter() {
                         if name.to_lowercase().contains(&state.component_search.to_lowercase()) {
@@ -74,11 +76,17 @@ fn inspector(world: &mut World, inspected: Option<Entity>, ui: &mut egui::Ui, st
                                 let ty = reg.get(*id).unwrap();
 
                                 ty.data::<ReflectComponent>().unwrap().add_component(world, inspected, &DynamicStruct::default());
+
+                                ui.close_menu();
+
+                                state.component_search.clear();
                             }
                         }
                     }
                 });
             });
+
+            ui.label("Don't see your component? Make sure to #[derive(Component, Reflect)], #[reflect(Component)], and register its type with the app!");
         });
     });
 }
