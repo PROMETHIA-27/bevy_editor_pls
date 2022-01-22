@@ -70,19 +70,21 @@ fn inspector(world: &mut World, inspected: Option<Entity>, ui: &mut egui::Ui, st
                 ui.menu_button("Add Component", |ui| {
                     ui.set_max_width(width);
                     ui.text_edit_singleline(&mut state.component_search);
-                    for (name, id) in comp_types.0.iter() {
-                        if name.to_lowercase().contains(&state.component_search.to_lowercase()) {
-                            if ui.button(name).clicked() {
-                                let ty = reg.get(*id).unwrap();
-
-                                ty.data::<ReflectComponent>().unwrap().add_component(world, inspected, &DynamicStruct::default());
-
-                                ui.close_menu();
-
-                                state.component_search.clear();
+                    egui::ScrollArea::vertical().show_rows(ui, ui.fonts()[egui::TextStyle::Body].row_height(), comp_types.0.len(), |ui, rows| {
+                        for (name, id) in comp_types.0[rows].iter() {
+                            if name.to_lowercase().contains(&state.component_search.to_lowercase()) {
+                                if ui.button(name).clicked() {
+                                    let ty = reg.get(*id).unwrap();
+    
+                                    ty.data::<ReflectComponent>().unwrap().add_component(world, inspected, &DynamicStruct::default());
+    
+                                    ui.close_menu();
+    
+                                    state.component_search.clear();
+                                }
                             }
                         }
-                    }
+                    });
                 });
             });
 
