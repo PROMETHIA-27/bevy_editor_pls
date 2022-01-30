@@ -1,12 +1,11 @@
+use super::add::{AddWindow, AddWindowState};
 use super::hierarchy::HierarchyWindow;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::{Entity, Mut, World};
 use bevy::reflect::{TypeRegistry, DynamicStruct};
 use bevy_editor_pls_core::editor_window::{EditorWindow, EditorWindowContext};
 use bevy_inspector_egui::egui;
-use bevy_inspector_egui::{
-    options::EntityAttributes, world_inspector::WorldUIContext, WorldInspectorParams,
-};
+use bevy_inspector_egui::{world_inspector::WorldUIContext, WorldInspectorParams};
 
 #[derive(Default)]
 pub struct InspectorState {
@@ -22,27 +21,17 @@ impl EditorWindow for InspectorWindow {
 
     fn ui(world: &mut World, mut cx: EditorWindowContext, ui: &mut egui::Ui) {
         let inspected = cx.state::<HierarchyWindow>().unwrap().selected;
-        inspector(world, inspected, ui, cx.state_mut::<InspectorWindow>().unwrap());
-    }
-
-    fn app_setup(app: &mut bevy::prelude::App) {
-        let mut comps = ComponentTypes(vec!());
-
-        let reg = app.world.get_resource::<TypeRegistry>().expect("Bevy reflect must be initialized before editor!");
-
-        for ty in reg.read().iter() {
-            if let Some(_) = ty.data::<ReflectComponent>() {
-                comps.0.push((ty.short_name().to_string(), ty.type_id()))
-            }
-        }
-
-        comps.0.sort();
-
-        app.insert_resource(comps);
+        let add_window_state = cx.state::<AddWindow>();
+        inspector(world, inspected, ui, add_window_state);
     }
 }
 
-fn inspector(world: &mut World, inspected: Option<Entity>, ui: &mut egui::Ui, state: &mut InspectorState) {
+fn inspector(
+    world: &mut World,
+    inspected: Option<Entity>,
+    ui: &mut egui::Ui,
+    add_window_state: Option<&AddWindowState>,
+) {
     let inspected = match inspected {
         Some(inspected) => inspected,
         None => {
@@ -51,44 +40,80 @@ fn inspector(world: &mut World, inspected: Option<Entity>, ui: &mut egui::Ui, st
         }
     };
 
+    if world.get_entity(inspected).is_none() {
+        ui.label("No entity selected");
+        return;
+    }
+
     world.resource_scope(|world, params: Mut<WorldInspectorParams>| {
-        let entity_options = EntityAttributes::default();
-        WorldUIContext::new(world, None).entity_ui_inner(
-            ui,
-            inspected,
-            &*params,
-            egui::Id::new("inspector"),
-            &entity_options,
-        );
-    });
-
-    world.resource_scope(|world, reg: Mut<TypeRegistry>| {
-        let reg = reg.read();
-        world.resource_scope(|world, comp_types: Mut<ComponentTypes>| {
-            ui.vertical_centered_justified(|ui| {
-                let width = ui.available_size().x;
-                ui.menu_button("Add Component", |ui| {
-                    ui.set_max_width(width);
-                    ui.text_edit_singleline(&mut state.component_search);
-                    egui::ScrollArea::vertical().show_rows(ui, ui.fonts()[egui::TextStyle::Body].row_height(), comp_types.0.len(), |ui, rows| {
-                        for (name, id) in comp_types.0[rows].iter() {
-                            if name.to_lowercase().contains(&state.component_search.to_lowercase()) {
-                                if ui.button(name).clicked() {
-                                    let ty = reg.get(*id).unwrap();
-    
-                                    ty.data::<ReflectComponent>().unwrap().add_component(world, inspected, &DynamicStruct::default());
-    
-                                    ui.close_menu();
-    
-                                    state.component_search.clear();
-                                }
-                            }
-                        }
-                    });
-                });
-            });
-
-            ui.label("Don't see your component? Make sure to #[derive(Component, Reflect)], #[reflect(Component)], and register its type with the app!");
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            InspectorUi::new(world, &*params, add_window_state, inspected).entity(ui, inspected);
         });
     });
+}
+
+struct InspectorUi<'a> {
+    world: &'a mut World,
+    params: &'a WorldInspectorParams,
+    add_window_state: Option<&'a AddWindowState>,
+    entity: Entity,
+}
+impl<'a> InspectorUi<'a> {
+    fn new(
+        world: &'a mut World,
+        params: &'a WorldInspectorParams,
+        add_window_state: Option<&'a AddWindowState>,
+        entity: Entity,
+    ) -> Self {
+        Self {
+            world,
+            params,
+            add_window_state,
+            entity,
+        }
+    }
+
+    fn add_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(add_window_state) = self.add_window_state {
+            let layout = egui::Layout::top_down(egui::Align::Center).with_cross_justify(true);
+            ui.with_layout(layout, |ui| {
+                ui.menu_button("+", |ui| {
+                    if let Some(add_item) = crate::add::add_ui(ui, add_window_state) {
+                        add_item.add_to_entity(self.world, self.entity);
+                    }
+                });
+            });
+        }
+    }
+
+    fn components_ui(&mut self, ui: &mut egui::Ui, entity: Entity) {
+        let id = egui::Id::new("inspector");
+        let mut world_ui_ctx = WorldUIContext::new(self.world, None);
+        world_ui_ctx.component_kind_ui(
+            ui,
+            |archetype| archetype.table_components(),
+            "Components",
+            entity,
+            self.params,
+            id,
+        );
+        world_ui_ctx.component_kind_ui(
+            ui,
+            |archetype| archetype.sparse_set_components(),
+            "Components (Sparse)",
+            entity,
+            self.params,
+            id,
+        );
+    }
+
+    fn entity(&mut self, ui: &mut egui::Ui, entity: Entity) {
+        self.components_ui(ui, entity);
+        self.add_ui(ui);
+    }
+}
+
+pub fn label_button(ui: &mut egui::Ui, text: &str, text_color: egui::Color32) -> bool {
+    ui.add(egui::Button::new(egui::RichText::new(text).color(text_color)).frame(false))
+        .clicked()
 }
